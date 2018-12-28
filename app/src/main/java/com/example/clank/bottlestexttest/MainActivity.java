@@ -32,6 +32,7 @@ import com.google.firebase.ml.vision.text.FirebaseVisionTextRecognizer;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.IOException;
 
@@ -56,7 +57,8 @@ public class MainActivity extends AppCompatActivity {
                     public void onResponse(String response) {
                         try {
                             JSONArray reader = new JSONArray(response); //TODO Fel vi får tillbaka en array
-                            DisplayDrug(reader);
+
+                            DisplayDrug(reader.getJSONObject(0));
                         } catch (JSONException e) {
                             e.printStackTrace();
                         }
@@ -76,16 +78,50 @@ public class MainActivity extends AppCompatActivity {
 
 
     }
-    public void DisplayDrug(JSONArray drugs)
+    public void DisplayDrug(JSONObject drugs)
     {
         try {
-            String drug = drugs.getJSONObject(0).toString(2);
+            String drug = drugs.toString(2);
             Intent intent = new Intent(this, Main2Activity.class);
             intent.putExtra(EXTRA_MESSAGE,drug);
             startActivity(intent);
         } catch (JSONException e) {
             e.printStackTrace();
         }
+    }
+    public void getImageStrings(FirebaseVisionDocumentText result){
+        RequestQueue queue = Volley.newRequestQueue(this);
+        final CloudLabelManipulator Apistr = new CloudLabelManipulator(result);
+        String url="http://213.66.251.184/Bottles/BottlesService.asmx/FirstSearch?name="+Apistr.getFirstStr()+"&strength="+Apistr.getDosage()+"&language=sv&fbclid=IwAR00DSzecqYioxMBf3h53q42YNhFrjCbpfjE1BWDGsPg3yZkCqQqg3nxWko";
+        StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
+                new Response.Listener<String>() {
+                    @Override
+                    public void onResponse(String response) {
+                        if (response.equals("[]")){
+                            Toast.makeText(getApplicationContext(), "Error With Image", Toast.LENGTH_SHORT).show(); //TODO Better Error Handling please.
+                            return;
+                        }
+                        try {
+                            JSONArray reader = new JSONArray(response); //TODO Fel vi får tillbaka en array
+                            DisplayDrug(Apistr.getDrug(reader));
+                        } catch (JSONException e) {
+                            e.printStackTrace();
+                        }
+
+                        // Display the first 500 characters of the response string.
+                        //                       mTextView.setText("Response is: "+ response.substring(0,500));
+                    }
+                }, new Response.ErrorListener() {
+            @Override
+            public void onErrorResponse(VolleyError error) {
+//                mTextView.setText("That didn't work!");
+            }
+        });
+
+// Add the request to the RequestQueue.
+        queue.add(stringRequest);
+
+
     }
     public void Chooseimage(View view){
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
@@ -109,6 +145,7 @@ public class MainActivity extends AppCompatActivity {
                         .addOnSuccessListener(new OnSuccessListener<FirebaseVisionDocumentText>() {
                             @Override
                             public void onSuccess(FirebaseVisionDocumentText result) {
+                            getImageStrings(result);
                                 // Task completed successfully
                                 // ...
                             }

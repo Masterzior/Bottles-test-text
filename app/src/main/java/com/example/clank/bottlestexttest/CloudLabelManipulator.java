@@ -126,7 +126,12 @@ public class CloudLabelManipulator {
                 e.printStackTrace();
             }
         }
-        return null; // TODO Could return the entire Array list which would be nice. We could work with that
+        try {
+            return Drugs.getJSONObject(0); // TODO Could return the entire Array list which would be nice. We could work with that
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+        return null;
     }
     public void SimpleIPrequest(String ProductName, String Dosage, String Variant, Context still){ //TODO i dont think we need to send the strings here if can fetch internal see above
         RequestQueue queue = Volley.newRequestQueue(still); // TODO change everything so it can return something right now it cant return anything that and thats a problem.
@@ -139,6 +144,7 @@ public class CloudLabelManipulator {
                 new Response.Listener<String>() {
                     @Override
                     public void onResponse(String response) {
+
                         try {
                             JSONArray reader = new JSONArray(response); //TODO Fel vi får tillbaka en array
                             getDrug(reader);
