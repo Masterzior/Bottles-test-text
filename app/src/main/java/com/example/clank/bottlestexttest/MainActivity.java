@@ -3,7 +3,10 @@ package com.example.clank.bottlestexttest;
 import android.app.Activity;
 import android.app.Notification;
 import android.content.Intent;
+import android.media.Image;
+import android.net.Uri;
 import android.provider.DocumentsProvider;
+import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.view.View;
@@ -16,17 +19,62 @@ import com.android.volley.Response;
 import com.android.volley.VolleyError;
 import com.android.volley.toolbox.StringRequest;
 import com.android.volley.toolbox.Volley;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.gms.tasks.Task;
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.ml.vision.FirebaseVision;
 import com.google.firebase.ml.vision.common.FirebaseVisionImage;
+import com.google.firebase.ml.vision.document.FirebaseVisionDocumentText;
+import com.google.firebase.ml.vision.text.FirebaseVisionText;
+import com.google.firebase.ml.vision.text.FirebaseVisionTextRecognizer;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 
+import java.io.IOException;
+
 public class MainActivity extends AppCompatActivity {
     public static final String EXTRA_MESSAGE = "com.example.myfirstapp.MESSAGE";
+    private static final int PICK_IMAGE = 1;
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data)
+    {
+        if (requestCode == PICK_IMAGE) {
+        FirebaseVisionImage image;
+        FirebaseApp.initializeApp(this);
+            try {
+            image = FirebaseVisionImage.fromFilePath(this, data.getData());
+            FirebaseVisionTextRecognizer detector = FirebaseVision.getInstance()
+                        .getOnDeviceTextRecognizer();
+                Task<FirebaseVisionText> result =
+                        detector.processImage(image) // Här crashar den
+                                .addOnSuccessListener(new OnSuccessListener<FirebaseVisionText>() {
+                                    @Override
+                                    public void onSuccess(FirebaseVisionText firebaseVisionText) {
+                                        String stop = "";
+                                        // ...
+                                    }
+                                })
+                                .addOnFailureListener(
+                                        new OnFailureListener() {
+                                            @Override
+                                            public void onFailure(@NonNull Exception e) {
+                                                // Task failed with an exception
+                                                // ...
+                                            }
+                                        });
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        }
+    }
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        FirebaseApp.initializeApp(this);
         setContentView(R.layout.activity_main);
     }
     public void onClickButton(View view){
@@ -73,9 +121,15 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     public void Chooseimage(View view){
-        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        Intent intent = new Intent();
         intent.setType("image/*");
-        startActivity(intent);
+        intent.setAction(Intent.ACTION_GET_CONTENT);
+        startActivityForResult(Intent.createChooser(intent, "Select Picture"), PICK_IMAGE);
+//        Intent pickImageIntent = new Intent(Intent.ACTION_PICK, Uri.parse("content://image"));
+//        pickImageIntent.setType("image/*");
+//        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+//        intent.setType("image/*");
+//        startActivity(intent);
 //        FirebaseVisionImage image;
 //        try {
 //            image = FirebaseVisionImage.fromFilePath(this, uri);
