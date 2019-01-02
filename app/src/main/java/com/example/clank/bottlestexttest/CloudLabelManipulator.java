@@ -113,14 +113,14 @@ public class CloudLabelManipulator {
         }
         return Apistr;
     }
-    public JSONObject getDrug (JSONArray Drugs){
+    public JSONObject getDrug (JSONArray Drugs){ //Takes in a JSONarray and fetches the one that matches the variation name for the object we have. it there is no variation name EX "Alvedon" then it will return the first object in the list.
         String Match = getFirstStr() + " " + getSecondStr(getFirstStr());
         for (int i=0;i < Drugs.length(); i++)
         {
             try {
                 if(Drugs.getJSONObject(i).getString("LegalName").equals(Match))
                 {
-                    return Drugs.getJSONObject(i); // TODO Returns into the Simple ip request function need to fix this
+                    return Drugs.getJSONObject(i); // Returns the found match to display it
                 }
             } catch (JSONException e) {
                 e.printStackTrace();

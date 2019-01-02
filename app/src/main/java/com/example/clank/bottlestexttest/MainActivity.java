@@ -37,7 +37,7 @@ import org.json.JSONObject;
 import java.io.IOException;
 
 public class MainActivity extends AppCompatActivity {
-    public static final String EXTRA_MESSAGE = "com.example.myfirstapp.MESSAGE";
+    public static final String EXTRA_MESSAGE = "com.example.myfirstapp.MESSAGE"; //Dont know what this does tbh
     private static final int PICK_IMAGE = 1;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,29 +81,29 @@ public class MainActivity extends AppCompatActivity {
     public void DisplayDrug(JSONObject drugs)
     {
         try {
-            String drug = drugs.toString(2);
-            Intent intent = new Intent(this, Main2Activity.class);
-            intent.putExtra(EXTRA_MESSAGE,drug);
-            startActivity(intent);
+            String drug = drugs.toString(2); //tostring(2) is a formater for the string. //TODO should extract the relevant text and cleanup the object before displaying it. Right now it looks bad
+            Intent intent = new Intent(this, Main2Activity.class); // Creates and intent to show the info
+            intent.putExtra(EXTRA_MESSAGE,drug); // put text into
+            startActivity(intent); // start the activity which contains the drug information.
         } catch (JSONException e) {
             e.printStackTrace();
         }
     }
     public void getImageStrings(FirebaseVisionDocumentText result){
         RequestQueue queue = Volley.newRequestQueue(this);
-        final CloudLabelManipulator Apistr = new CloudLabelManipulator(result);
+        final CloudLabelManipulator Apistr = new CloudLabelManipulator(result); // Creates a cloudlabelmanipulator object out of the result from the firebasedocumenttext object we made earlier. we use functions in this class to find relevant text
         String url="http://213.66.251.184/Bottles/BottlesService.asmx/FirstSearch?name="+Apistr.getFirstStr()+"&strength="+Apistr.getDosage()+"&language=sv&fbclid=IwAR00DSzecqYioxMBf3h53q42YNhFrjCbpfjE1BWDGsPg3yZkCqQqg3nxWko";
         StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
                 new Response.Listener<String>() {
                     @Override
                     public void onResponse(String response) {
-                        if (response.equals("[]")){
+                        if (response.equals("[]")){  // The API we have sends this if there is nothing to fetch so this is the same as 404
                             Toast.makeText(getApplicationContext(), "Error With Image", Toast.LENGTH_SHORT).show(); //TODO Better Error Handling please.
                             return;
                         }
                         try {
-                            JSONArray reader = new JSONArray(response); //TODO Fel vi får tillbaka en array
-                            DisplayDrug(Apistr.getDrug(reader));
+                            JSONArray reader = new JSONArray(response); // Makes a reader of the response we got from the API
+                            DisplayDrug(Apistr.getDrug(reader)); //Uses the function inside apistr to get the drugs out of it.
                         } catch (JSONException e) {
                             e.printStackTrace();
                         }
@@ -127,7 +127,7 @@ public class MainActivity extends AppCompatActivity {
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("image/*");
-        startActivityForResult(Intent.createChooser(intent, "Select Picture"),PICK_IMAGE);
+        startActivityForResult(Intent.createChooser(intent, "Select Picture"),PICK_IMAGE); // Starts an activity for choosing an image and tries to fetch URI of the image. See below for result handling
     }
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -135,17 +135,17 @@ public class MainActivity extends AppCompatActivity {
 
         if (requestCode == PICK_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
 
-            Uri uri = data.getData();
-            FirebaseVisionImage image;
+            Uri uri = data.getData(); // Gets the URI of the chosen image
+            FirebaseVisionImage image; // creates a FirebasevisionIMAGE object called image. we will manipulate this object into a FirebasevisionDOCUMENTTEXT object.
             try {
-                image = FirebaseVisionImage.fromFilePath(this, uri);
+                image = FirebaseVisionImage.fromFilePath(this, uri); // Creates a firebaseVisionimage object. This is reduntant from above and should be fixed.
                 FirebaseVisionDocumentTextRecognizer detector = FirebaseVision.getInstance()
                         .getCloudDocumentTextRecognizer();
                 detector.processImage(image)
-                        .addOnSuccessListener(new OnSuccessListener<FirebaseVisionDocumentText>() {
+                        .addOnSuccessListener(new OnSuccessListener<FirebaseVisionDocumentText>() { // Calls the api to get a firebasevisiondocument from the image we sent to the api.
                             @Override
                             public void onSuccess(FirebaseVisionDocumentText result) {
-                            getImageStrings(result);
+                            getImageStrings(result); // Here we extracts the relevant information out of the object.
                                 // Task completed successfully
                                 // ...
                             }
