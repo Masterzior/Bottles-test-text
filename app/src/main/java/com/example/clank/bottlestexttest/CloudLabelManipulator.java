@@ -53,7 +53,7 @@ public class CloudLabelManipulator {
                 for (FirebaseVisionDocumentText.Word words : paragraph.getWords()) {
                     if (words.getText().matches(".*\\d+.*")){
 
-                        if(words.getText().contains("mg")){
+                        if(words.getText().matches("mg|g|ml|kg|cl")){
                             Apistr = words.getText(); // TODO Testa denna fungerar som den ska. Behöver mellanslag!!
                             String [] arr = Apistr.split( "(?=\\D)", 2); // Makes an array and keeps the delimiter. The delimiter here is the first non-digit
                             String pt1 = arr[0].trim();
@@ -65,7 +65,7 @@ public class CloudLabelManipulator {
                             int pos = paragraph.getWords().indexOf(words);
                             if((pos +1) < paragraph.getWords().size()){
                                 FirebaseVisionDocumentText.Word nextword = paragraph.getWords().get(pos + 1);
-                                if(nextword != null && nextword.getText().contains("mg")){
+                                if(nextword != null && nextword.getText().matches("mg|g|ml|kg|cl")){
                                   //  Apistr = words.getText() + "%20" + nextword.getText(); // TODO sätta standard på tillbaka medellande
                                     String Dosage = words.getText(); //TODO Förra kanske var snabbare
                                     String Size = nextword.getText();

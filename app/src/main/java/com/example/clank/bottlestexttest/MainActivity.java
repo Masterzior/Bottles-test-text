@@ -1,16 +1,22 @@
 package com.example.clank.bottlestexttest;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.Notification;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.media.Image;
 import android.net.Uri;
 import android.provider.DocumentsProvider;
 import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.view.Gravity;
+import android.view.TextureView;
 import android.view.View;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.Toast;
 
 import com.android.volley.Request;
@@ -39,13 +45,63 @@ import java.io.IOException;
 public class MainActivity extends AppCompatActivity {
     public static final String EXTRA_MESSAGE = "com.example.myfirstapp.MESSAGE"; //Dont know what this does tbh
     private static final int PICK_IMAGE = 1;
+
+    private CameraHandler cameraHandler;
+
+
+    CameraHandler.OnTextRecognizedListener onTextRecognizedListener = new CameraHandler.OnTextRecognizedListener() {
+        @Override
+        public void onTextRecognized(FirebaseVisionDocumentText text) {
+
+            //TODO Work with Firebasetext object here?
+           /* Toast t = Toast.makeText(getApplicationContext(),text.getText(), Toast.LENGTH_LONG);
+            t.setGravity(Gravity.TOP,0,0);
+            t.show();*/
+            getImageStrings(text);
+        }
+    };
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         FirebaseApp.initializeApp(this);
         setContentView(R.layout.activity_main);
+
+        ActivityCompat.requestPermissions(this,new String[]
+                {Manifest.permission.CAMERA,Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
     }
-    public void onClickButton(View view){
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+
+        if(cameraHandler != null) {
+            cameraHandler.closeCamera();
+            cameraHandler = null;
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+        if(cameraHandler != null) {
+            cameraHandler.closeCamera();
+            cameraHandler = null;
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        cameraHandler = new CameraHandler(this, (TextureView) findViewById(R.id.previewWindow),(ImageButton)findViewById(R.id.snapshotBtn));
+
+        cameraHandler.setOnTextRecognizedListener(onTextRecognizedListener);
+    }
+
+/*    public void onClickButton(View view){
         EditText product = findViewById(R.id.product_text);
         EditText dosage = findViewById(R.id.dosage_text);
         String message = product.getText().toString() +" "+ dosage.getText().toString();
@@ -77,7 +133,7 @@ public class MainActivity extends AppCompatActivity {
         queue.add(stringRequest);
 
 
-    }
+    }*/
     public void DisplayDrug(JSONObject drugs)
     {
         try {
@@ -123,7 +179,7 @@ public class MainActivity extends AppCompatActivity {
 
 
     }
-    public void Chooseimage(View view){
+/*    public void Chooseimage(View view){
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("image/*");
@@ -161,6 +217,24 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
 
+        }
+    }*/
+
+    public void onRequestPermissionsResult(int requestCode, String permissions[], int[] grantResults) {
+        switch (requestCode) {
+            case 1: {
+                // If request is cancelled, the result arrays are empty.
+                if (grantResults.length > 0
+                        && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+
+                } else {
+                    // permission denied, boo! Disable the
+                    // functionality that depends on this permission.
+                }
+                return;
+            }
+            // other 'case' lines to check for other
+            // permissions this app might request
         }
     }
 }
