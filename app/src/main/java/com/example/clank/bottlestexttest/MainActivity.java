@@ -49,7 +49,7 @@ public class MainActivity extends AppCompatActivity {
     private CameraHandler cameraHandler;
 
 
-    CameraHandler.OnTextRecognizedListener onTextRecognizedListener = new CameraHandler.OnTextRecognizedListener() {
+    CameraHandler.OnTextRecognizedSuccessListener onTextRecognizedListener = new CameraHandler.OnTextRecognizedSuccessListener() {
         @Override
         public void onTextRecognized(FirebaseVisionDocumentText text) {
 
@@ -60,7 +60,13 @@ public class MainActivity extends AppCompatActivity {
             getImageStrings(text);
         }
     };
+    CameraHandler.OnTextRecognizedFailedListener onTextRecognizedFailedListener = new CameraHandler.OnTextRecognizedFailedListener() {
+        @Override
+        public void onTextRecognizedFailed(String msg) {
 
+            Toast.makeText(getApplicationContext(),msg,Toast.LENGTH_SHORT).show();
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -96,9 +102,11 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
 
-        cameraHandler = new CameraHandler(this, (TextureView) findViewById(R.id.previewWindow),(ImageButton)findViewById(R.id.snapshotBtn));
+        if(cameraHandler != null) cameraHandler.closeCamera();
+        cameraHandler = new CameraHandler(this, (AutoFitTextureView) findViewById(R.id.previewWindow),(ImageButton)findViewById(R.id.snapshotBtn));
 
-        cameraHandler.setOnTextRecognizedListener(onTextRecognizedListener);
+        cameraHandler.setOnTextRecognizedSuccessListener(onTextRecognizedListener);
+        cameraHandler.setOnTextRecognizedFailedListener(onTextRecognizedFailedListener);
     }
 
 /*    public void onClickButton(View view){
@@ -171,6 +179,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onErrorResponse(VolleyError error) {
 //                mTextView.setText("That didn't work!");
+                Toast.makeText(getApplicationContext(), "Could not communicate with database. Try again later.", Toast.LENGTH_SHORT).show();
             }
         });
 

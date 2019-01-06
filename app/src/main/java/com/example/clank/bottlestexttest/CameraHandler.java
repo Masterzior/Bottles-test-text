@@ -4,8 +4,10 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
+import android.graphics.Point;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
@@ -42,21 +44,17 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 
+import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.firebase.ml.vision.FirebaseVision;
 import com.google.firebase.ml.vision.common.FirebaseVisionImage;
 import com.google.firebase.ml.vision.common.FirebaseVisionImageMetadata;
 import com.google.firebase.ml.vision.document.FirebaseVisionDocumentText;
 import com.google.firebase.ml.vision.document.FirebaseVisionDocumentTextRecognizer;
-import com.google.firebase.ml.vision.text.FirebaseVisionText;
-import com.google.firebase.ml.vision.text.FirebaseVisionTextRecognizer;
 
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedList;
@@ -66,9 +64,6 @@ import static android.content.Context.CAMERA_SERVICE;
 
 public class CameraHandler {
 
-    private enum CameraHandlerType {StillImage, LivePreview};
-    private CameraHandlerType typeOfHandler;
-
     private static final int PREVIEW_STATE = 0;
     private static final int AWAIT_LOCK_STATE = 1;
     private static final int AWAITING_PRECAPTURE_STATE = 2;
@@ -76,11 +71,12 @@ public class CameraHandler {
     private static final int PICTURE_TAKEN_STATE = 4;
     private int currentCameraState = 0;
 
-    private static final int RECOGNIZED_TEXT = 0;
+    private static final int RECOGNIZED_TEXT_SUCCESS = 0;
+    private static final int RECOGNIZED_TEXT_FAIL = 1;
 
     private CameraManager cameraManager;
     private Context ctx;
-    private TextureView cameraView;
+    private AutoFitTextureView cameraView;
     private Size streamsize;
     private CameraDevice cameraDevice;
     private CaptureRequest.Builder captureBuilder;
@@ -90,26 +86,29 @@ public class CameraHandler {
     private int texturewidth;
     private int textureheight;
     private String selectedcameraId;
-    private TextView infoText;
+    private boolean mFlashSupported;
+    
     private ImageButton snapshotButton;
-
-    File fileToSave;
 
     private HandlerThread backGroundThread;
     private Handler backGroundHandler;
 
     private Handler uiHandler;
 
-    private Handler recHandler;
-    private HandlerThread recHandlerThread;
-    private TextRecognitionEngine textEngine;
+  /*  private Handler recHandler;
+    private HandlerThread recHandlerThread;*/
+
+    //Size supported by preview window
+    private final static int MAX_PREVIEW_HEIGHT = 1080;
+    private final static int MAX_PREVIEW_WIDTH = 1920;
 
     //Size is enough for text capture
     private final static int TEXT_CAPTURE_WIDTH = 480;
     private final static int TEXT_CAPTURE_HEIGHT = 360;
-    private final static int FRAME_DETECT_THRESHOLD = 3;
 
-    private OnTextRecognizedListener listener;
+
+    private OnTextRecognizedSuccessListener text_success_listener;
+    private OnTextRecognizedFailedListener text_fail_listener;
 
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
 
@@ -120,27 +119,13 @@ public class CameraHandler {
         ORIENTATIONS.append(Surface.ROTATION_270, 180);
     }
 
-    //Used for live feed
-    public CameraHandler(Context ctx, TextureView textureView, TextView textInfo) {
 
-        this.ctx = ctx;
-        this.cameraView = textureView;
-        this.infoText = textInfo;
-        this.typeOfHandler = CameraHandlerType.LivePreview;
-
-        cameraView.setSurfaceTextureListener(textureListener);
-
-    }
-
-    //Used for still image capture
-    public CameraHandler(Context ctx, TextureView textureView, ImageButton snapshotButton) {
+    public CameraHandler(Context ctx, AutoFitTextureView textureView, ImageButton snapshotButton) {
 
         this.ctx = ctx;
         this.cameraView = textureView;
         this.snapshotButton = snapshotButton;
-        this.typeOfHandler = CameraHandlerType.StillImage;
         cameraView.setSurfaceTextureListener(textureListener);
-        fileToSave = new File(ctx.getExternalFilesDir(null), "temp_pic.jpg");
 
     }
 
@@ -219,7 +204,7 @@ public class CameraHandler {
 
         @Override
         public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-            closeCamera();
+            //closeCamera();
             return false;
         }
 
@@ -254,6 +239,11 @@ public class CameraHandler {
                     StreamConfigurationMap streamConfigurationMap = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
 
                     streamsize = chooseOptimalPreviewSize(streamConfigurationMap.getOutputSizes(SurfaceTexture.class), texturewidth, textureheight);
+
+                    // Check if the flash is supported.
+                    Boolean available = cameraCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                    mFlashSupported = available == null ? false : available;
+
                     selectedcameraId = cameraId;
                 }
             }
@@ -265,6 +255,16 @@ public class CameraHandler {
 
 
             rotation = getRotationCompensation(selectedcameraId, (Activity) ctx, ctx);
+
+            // We fit the aspect ratio of TextureView to the size of preview we picked.
+            int orientation = ctx.getResources().getConfiguration().orientation;
+            if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                cameraView.setAspectRatio(
+                        streamsize.getWidth(), streamsize.getHeight());
+            } else {
+                cameraView.setAspectRatio(
+                        streamsize.getHeight(), streamsize.getWidth());
+            }
 
             startBackGroundThread();
 
@@ -278,37 +278,89 @@ public class CameraHandler {
         }
     }
 
+
     //This selects the closest matching image size the camera outputs to the surface
     private Size chooseOptimalPreviewSize(Size[] sizes_available, int width, int height) {
 
-        ArrayList<Size> sizelist = new ArrayList<>();
+        //Get the device screen size
+        Point displaySize = new Point();
+        ((Activity)ctx).getWindowManager().getDefaultDisplay().getSize(displaySize);
+
+        int maxPreviewWidth = displaySize.x;
+        int maxPreviewHeight = displaySize.y;
+
+        Size largest_image = Collections.max(
+                Arrays.asList(sizes_available),
+                new Comparator<Size>() {
+
+                    @Override
+                    public int compare(Size o1, Size o2) {
+
+                        return Long.signum((o1.getWidth() * o1.getHeight()) - (o2.getWidth() * o2.getHeight()));
+                    }
+                });
+
+        int w = largest_image.getWidth();
+        int h = largest_image.getHeight();
+
+
+        ArrayList<Size> sizelistAbove = new ArrayList<>();
+        ArrayList<Size> sizelistBelow = new ArrayList<>();
 
         for (Size size : sizes_available) {
 
             //Landscape mode
             if (width > height) {
 
-                //If the size is bigger than our preview window
-                if (size.getWidth() > width && size.getHeight() > height) {
-
-                    sizelist.add(size);
+                if(maxPreviewWidth > MAX_PREVIEW_WIDTH){
+                    maxPreviewWidth = MAX_PREVIEW_WIDTH;
                 }
+                if(maxPreviewHeight > MAX_PREVIEW_HEIGHT){
+                    maxPreviewHeight = MAX_PREVIEW_HEIGHT;
+                }
+
+                if(size.getWidth() <= maxPreviewWidth && size.getHeight() <= maxPreviewHeight && size.getHeight() == size.getWidth() * h / w){
+
+                    //If the size is bigger or match our preview window
+                    if (size.getWidth() >= width && size.getHeight() >= height) {
+
+                        sizelistAbove.add(size);
+                    }
+                    else{
+                        sizelistBelow.add(size);
+                    }
+                }
+
             }
             //Portrait mode
             else {
 
-                if (size.getWidth() > height && size.getHeight() > width) {
-
-                    sizelist.add(size);
+                if(maxPreviewWidth > MAX_PREVIEW_HEIGHT){
+                    maxPreviewWidth = MAX_PREVIEW_HEIGHT;
                 }
+                if(maxPreviewHeight > MAX_PREVIEW_WIDTH){
+                    maxPreviewHeight = MAX_PREVIEW_WIDTH;
+                }
+
+                if(size.getWidth() <= maxPreviewHeight && size.getHeight() <= maxPreviewWidth && (size.getWidth() == size.getHeight() * w / h)){
+
+                    if (size.getWidth() >= height && size.getHeight() >= width) {
+
+                        sizelistAbove.add(size);
+                    }
+                    else{
+                        sizelistBelow.add(size);
+                    }
+                }
+
             }
         }
 
-        //Select the closest match
-        if (sizelist.size() > 0) {
+        //Select the biggest closest match
+        if (sizelistAbove.size() > 0) {
 
             //Compare resolutions in list to find the closest
-            Size optimal_size = Collections.min(sizelist, new Comparator<Size>() {
+            Size optimal_size = Collections.min(sizelistAbove, new Comparator<Size>() {
 
                 @Override
                 public int compare(Size o1, Size o2) {
@@ -319,9 +371,26 @@ public class CameraHandler {
 
             return optimal_size;
         }
+        //Select the closest of the smaller sizes
+        else if(sizelistBelow.size() > 0){
 
-        //If no optimal found, return the biggest
-        return sizes_available[0];
+            //Compare resolutions in list to find the closest
+            Size optimal_size = Collections.max(sizelistBelow, new Comparator<Size>() {
+
+                @Override
+                public int compare(Size o1, Size o2) {
+
+                    return Long.signum((o1.getWidth() * o1.getHeight()) - (o2.getWidth() * o2.getHeight()));
+                }
+            });
+
+            return optimal_size;
+        }
+        else{
+            //If no optimal found, return the biggest
+            return sizes_available[0];
+        }
+
     }
 
     private CameraDevice.StateCallback camerastateCallback = new CameraDevice.StateCallback() {
@@ -386,16 +455,11 @@ public class CameraHandler {
         if (texture == null) {
             return;
         }
-        texture.setDefaultBufferSize(texturewidth, textureheight);
+        texture.setDefaultBufferSize(streamsize.getWidth(), streamsize.getHeight());
         Surface surface = new Surface(texture);
 
         //Imagereader for images used for textrecognition
-        if(typeOfHandler == CameraHandlerType.LivePreview){
-            imageReader = ImageReader.newInstance(TEXT_CAPTURE_WIDTH, TEXT_CAPTURE_HEIGHT, ImageFormat.JPEG, 1);
-        }
-        else{
-            imageReader = ImageReader.newInstance(TEXT_CAPTURE_WIDTH, TEXT_CAPTURE_HEIGHT, ImageFormat.YUV_420_888, 1);
-        }
+        imageReader = ImageReader.newInstance(TEXT_CAPTURE_WIDTH, TEXT_CAPTURE_HEIGHT, ImageFormat.YUV_420_888, 1);
 
         uiHandler = new Handler(Looper.getMainLooper()){
 
@@ -405,20 +469,22 @@ public class CameraHandler {
                 switch(msg.what){
 
                     //Get Firebase text object
-                    case RECOGNIZED_TEXT:
+                    case RECOGNIZED_TEXT_SUCCESS:
 
-
-                        listener.onTextRecognized((FirebaseVisionDocumentText)msg.obj);
+                        text_success_listener.onTextRecognized((FirebaseVisionDocumentText)msg.obj);
 
                         break;
 
                     //Stop live camera feed
-                    case 1:
+                    case RECOGNIZED_TEXT_FAIL:
 
-                        textEngine.stop();
-                        cameraDevice.close();
+                        text_fail_listener.onTextRecognizedFailed((String) msg.obj);
                         break;
 
+                    case 2:
+                        //textEngine.stop();
+                        cameraDevice.close();
+                        break;
                         default:
                             break;
                 }
@@ -439,27 +505,12 @@ public class CameraHandler {
         List<Surface> outputSurfaces = new LinkedList<>();
 
 
-        //Thread for the text recognition
+ /*       //Thread for the text recognition
         recHandlerThread = new HandlerThread("Live Rec Text");
         recHandlerThread.start();
-        recHandler = new Handler(recHandlerThread.getLooper());
+        recHandler = new Handler(recHandlerThread.getLooper());*/
 
-        //If Live preview capture is used
-        if(typeOfHandler == CameraHandlerType.LivePreview){
-
-            textEngine = new TextRecognitionEngine(FRAME_DETECT_THRESHOLD,uiHandler);
-            recHandler.post(textEngine);
-
-            captureBuilder.addTarget(imageReader.getSurface());
-        }
-        //If Still image capture is used
-        else if(typeOfHandler == CameraHandlerType.StillImage){
-
-            snapshotButton.setOnClickListener(onSnapshotClick);
-        }
-
-
-
+        snapshotButton.setOnClickListener(onSnapshotClick);
         imageReader.setOnImageAvailableListener(ImageAvailable, backGroundHandler);
         outputSurfaces.add(imageReader.getSurface());
         outputSurfaces.add(surface);
@@ -490,9 +541,9 @@ public class CameraHandler {
             return;
         }
 
-        captureBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
+        //captureBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
         captureBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
-
+        setAutoFlash(captureBuilder);
         try {
             captureSession.setRepeatingRequest(captureBuilder.build(), captureCallback, null);
         } catch (Exception e) {
@@ -578,17 +629,8 @@ public class CameraHandler {
         @Override
         public void onImageAvailable(final ImageReader reader) {
 
-            //If live preview is used
-            if(typeOfHandler == CameraHandlerType.LivePreview){
-                //Send the image frame to separate thread for text processing
-                textEngine.addImageForProcessing(reader.acquireNextImage(), rotation);
-            }
-            //If still image capture is used, image is available here after button click
-            else if(typeOfHandler == CameraHandlerType.StillImage){
-
-                recHandler.post(textEngine = new TextRecognitionEngine(uiHandler,reader.acquireNextImage(),rotation,fileToSave));
-
-            }
+            //recHandler.post(new TextFromImageRecognizer(reader.acquireNextImage(),rotation));
+            backGroundHandler.post(new TextFromImageRecognizer(reader.acquireNextImage(),rotation));
         }
     };
 
@@ -619,12 +661,13 @@ public class CameraHandler {
 
             captureBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
 
+            setAutoFlash(captureBuilder);
+
             captureSession.capture(captureBuilder.build(),captureCallback, backGroundHandler);
 
-
-            //TODO What happens after snapshot?
             currentCameraState = PREVIEW_STATE;
 
+            //TODO What happens after snapshot?
             //Restart preview temporarily
             restartPreview();
 
@@ -636,10 +679,10 @@ public class CameraHandler {
 
     private void preCaptureSequence() {
         try {
-            // This is how to tell the camera to trigger.
+            // Tell the camera to trigger.
             captureBuilder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
                     CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START);
-            // Tell #mCaptureCallback to wait for the precapture sequence to be set.
+            // Wait for the precapture sequence to be set.
             currentCameraState = AWAITING_PRECAPTURE_STATE;
             captureSession.capture(captureBuilder.build(), captureCallback,
                     backGroundHandler);
@@ -654,8 +697,10 @@ public class CameraHandler {
             CaptureRequest.Builder snapCaptureBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
             snapCaptureBuilder.addTarget(imageReader.getSurface());
 
-            captureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+            snapCaptureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+
+            setAutoFlash(snapCaptureBuilder);
 
             snapCaptureBuilder.set(CaptureRequest.JPEG_ORIENTATION,ORIENTATIONS.get(rotation));
 
@@ -675,6 +720,13 @@ public class CameraHandler {
 
         } catch (CameraAccessException e) {
             e.printStackTrace();
+        }
+    }
+
+    private void setAutoFlash(CaptureRequest.Builder requestBuilder) {
+        if (mFlashSupported) {
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
+
         }
     }
 
@@ -723,26 +775,33 @@ public class CameraHandler {
         }
 
 
-        if(recHandlerThread != null){
+/*        if(recHandlerThread != null){
 
-            textEngine.stop();
             recHandlerThread.quitSafely();
             try {
                 recHandlerThread.join();
                 recHandlerThread = null;
                 recHandler = null;
-                textEngine = null;
+
             }catch (InterruptedException e){
                 e.printStackTrace();
             }
 
-        }
+        }*/
 
     }
 
     public void closeCamera() {
 
         if(captureSession != null){
+
+            try {
+                captureSession.stopRepeating();
+                captureSession.abortCaptures();
+
+            } catch (CameraAccessException e) {
+                e.printStackTrace();
+            }
             captureSession.close();
             captureSession = null;
         }
@@ -759,11 +818,11 @@ public class CameraHandler {
         closeThreads();
     }
 
-    public void setOnTextRecognizedListener(OnTextRecognizedListener listener){
-        this.listener = listener;
+    public void setOnTextRecognizedSuccessListener(OnTextRecognizedSuccessListener listener){
+        this.text_success_listener = listener;
     }
 
-    public interface OnTextRecognizedListener{
+    public interface OnTextRecognizedSuccessListener{
 
 
         void onTextRecognized(FirebaseVisionDocumentText text);
@@ -771,178 +830,72 @@ public class CameraHandler {
     }
 
 
-    private static class TextRecognitionEngine implements Runnable {
+    public void setOnTextRecognizedFailedListener(OnTextRecognizedFailedListener listener){
+        this.text_fail_listener = listener;
+    }
 
-        private Boolean isRunning = true;
-        private Boolean isProcessing = false;
-        private Boolean continousRun;
-        private Boolean saveFile = false;
-
-        private FirebaseVisionDocumentTextRecognizer textRecognizer;
-        private FirebaseVisionImage firebaseVisionImage;
-        private int rotation;
-        private Image image;
-        private File mFile;
-
-        private int frameThreshold;
-        private int frameCount = 0;
-        private Handler uiHandler;
+    public interface OnTextRecognizedFailedListener{
 
 
-        private TextRecognitionEngine(Handler uiHandler,Image imageIn, int rotation, File saveFile){
+        void onTextRecognizedFailed(String msg);
 
-            this.uiHandler = uiHandler;
-            continousRun = false;
-            mFile = saveFile;
+    }
 
-            addImageForProcessing(imageIn,rotation);
-        }
+    private class TextFromImageRecognizer implements Runnable{
 
-        private TextRecognitionEngine(int frameThreshold, Handler uihandler) {
-
-            this.frameThreshold = frameThreshold;
-            this.uiHandler = uihandler;
-            continousRun = true;
+        FirebaseVisionDocumentTextRecognizer textRecognizer;
+        FirebaseVisionImage firebaseVisionImage;
 
 
-        }
+        public TextFromImageRecognizer(Image image, int image_rotation) {
 
-        private void saveFile(){
+            textRecognizer = FirebaseVision.getInstance().getCloudDocumentTextRecognizer();
+            firebaseVisionImage = FirebaseVisionImage.fromMediaImage(image, image_rotation);
 
-            ByteBuffer buffer = image.getPlanes()[0].getBuffer();
-            byte[] bytes = new byte[buffer.remaining()];
-            buffer.get(bytes);
-            FileOutputStream output = null;
-
-            try {
-                output = new FileOutputStream(mFile);
-                output.write(bytes);
-            } catch (IOException e) {
-                e.printStackTrace();
-            } finally {
-                image.close();
-                if (null != output) {
-                    try {
-                        output.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-            }
-
-        }
-
-        public synchronized void addImageForProcessing(Image imagein, int rotationin) {
-
-            if(!continousRun){
-                isRunning = true;
-            }
-            else if (!readyForProcessing() || isProcessing || !isRunning) {
-
-                frameCount++;
-                imagein.close();
-                return;
-            }
-
-            this.image = imagein;
-            this.rotation = rotationin;
-
-            if (firebaseVisionImage != null) return;
-
-            firebaseVisionImage = FirebaseVisionImage.fromMediaImage(image, rotation);
-
-            if(!continousRun && saveFile){
-                saveFile();
-            }
-            else{
-                image.close();
-            }
-
-            isProcessing = true;
-
-            frameCount = 0;
-        }
-
-        //If threshold is met a new frame can be processed
-        private boolean readyForProcessing() {
-
-            if(frameCount >= frameThreshold || !continousRun){
-
-                frameCount = 0;
-                return true;
-            }
-            else{
-                return false;
-            }
-        }
-
-
-        public void stop(){
-            isRunning = false;
-        }
-
-        public synchronized Boolean isProcessing() {
-            return isProcessing;
-        }
-
-        public synchronized Boolean isRunning() {
-            return isRunning;
+            image.close();
         }
 
         @Override
         public void run() {
 
-            textRecognizer = FirebaseVision.getInstance().getCloudDocumentTextRecognizer();
+            if(firebaseVisionImage != null && textRecognizer != null){
 
-            while(isRunning) {
+                textRecognizer.processImage(firebaseVisionImage).addOnSuccessListener(new OnSuccessListener<FirebaseVisionDocumentText>() {
+                    @Override
+                    public void onSuccess(final FirebaseVisionDocumentText firebaseVisionDocumentText) {
 
-                if (isProcessing) {
-
-                    if(firebaseVisionImage != null && textRecognizer != null){
-
-                        textRecognizer.processImage(firebaseVisionImage).addOnSuccessListener(new OnSuccessListener<FirebaseVisionDocumentText>() {
-                            @Override
-                            public void onSuccess(final FirebaseVisionDocumentText firebaseVisionDocumentText) {
-
-                                if (!firebaseVisionDocumentText.getBlocks().isEmpty()) {
+                        if (firebaseVisionDocumentText != null && !firebaseVisionDocumentText.getBlocks().isEmpty()) {
 
 
-                                    Log.d("FIREBASE_TEXT_REC", firebaseVisionDocumentText.getText());
+                            Log.d("FIREBASE_TEXT_REC", firebaseVisionDocumentText.getText());
 
-                                    //TODO Send the text object to UI thread? Or work with it here?
-                                    Message message_obj = uiHandler.obtainMessage(RECOGNIZED_TEXT,firebaseVisionDocumentText);
-                                    message_obj.sendToTarget();
+                            //TODO Send the text object to UI thread? Or work with it here?
+                            Message message_obj = uiHandler.obtainMessage(RECOGNIZED_TEXT_SUCCESS,firebaseVisionDocumentText);
+                            message_obj.sendToTarget();
 
-                                    //Run line below to stop camera feed
-                                    //uiHandler.sendEmptyMessage(2);
-                                }
+                            //Run line below to stop camera feed
+                            //uiHandler.sendEmptyMessage(2);
+                        }
+                        else{
+                            Message message_obj = uiHandler.obtainMessage(RECOGNIZED_TEXT_FAIL,"Unable to detect text, please try again.");
+                            message_obj.sendToTarget();
+                        }
 
-                            }
-                        });
                     }
 
+                }).addOnFailureListener(new OnFailureListener() {
+                    @Override
+                    public void onFailure(@NonNull Exception e) {
 
-                    firebaseVisionImage = null;
-                    isProcessing = false;
-                }
+                        //TODO Send the text object to UI thread? Or work with it here?
+                        Message message_obj = uiHandler.obtainMessage(RECOGNIZED_TEXT_FAIL,e.getMessage());
+                        message_obj.sendToTarget();
 
-                if(!continousRun) isRunning = false;
+                    }
+                });
             }
 
-            //Close the TextRecognizer
-            try {
-                if (textRecognizer != null) {
-
-                    textRecognizer.close();
-                    textRecognizer = null;
-                }
-
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
         }
-
-
     }
 
 }
